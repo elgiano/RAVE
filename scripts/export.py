@@ -112,6 +112,9 @@ class ScriptedRAVE(nn_tilde.Module):
         self.register_attribute("learn_source", False)
         self.register_attribute("reset_source", False)
 
+        self.register_attribute("listen", False)
+        self.register_attribute("temperature", 1.0)
+
         self.register_buffer("latent_pca", pretrained.latent_pca)
         self.register_buffer("latent_mean", pretrained.latent_mean)
         self.register_buffer("fidelity", pretrained.fidelity)
@@ -195,13 +198,21 @@ class ScriptedRAVE(nn_tilde.Module):
             self._has_prior = True
             self.prior_module = prior
             # need to init cached conv before graphing
-            z = self.prior_module.forward(torch.zeros(1, self.n_channels, self.full_latent_size))
+            z = self.prior_module.forward(torch.zeros(1, self.latent_size, self.full_latent_size))
             self.register_method(
                 "prior",
-                in_channels=1,
+                in_channels=self.latent_size,
                 in_ratio=prior.ratio,
                 out_channels = self.latent_size,
                 out_ratio=prior.ratio,
+                test_method=False
+            )
+            self.register_method(
+                "audioprior",
+                in_channels=self.n_channels,
+                in_ratio=1,
+                out_channels=self.target_channels,
+                out_ratio=1,
                 test_method=False
             )
         else:
@@ -264,8 +275,6 @@ class ScriptedRAVE(nn_tilde.Module):
         z = self.encoder(x)
         z = self.post_process_latent(z)
         return z
-
-    @torch.jit.export
 
 
     @torch.jit.export
@@ -343,12 +352,34 @@ class ScriptedRAVE(nn_tilde.Module):
         return 0
 
     @torch.jit.export
-    def prior(self, temp: torch.Tensor):
-        if self._has_prior:
-            return self.prior_module.forward(temp)
-        else:
-            return torch.tensor(0)
-        
+    def get_listen(self) -> bool:
+        return self.listen[0]
+
+    @torch.jit.export
+    def set_listen(self, listen: bool) -> int:
+        self.prior_module.listen = listen
+        self.listen = (listen, )
+        return 0
+
+    @torch.jit.export
+    def get_temperature(self) -> float:
+        return self.temperature[0]
+
+    @torch.jit.export
+    def set_temperature(self, temp: float) -> int:
+        self.prior_module.temperature = temp
+        self.temperature = (temp, )
+        return 0
+
+    @torch.jit.export
+    def prior(self, z: torch.Tensor):
+        return self.prior_module.forward(z)
+
+    @torch.jit.export
+    def prioraudio(self, z: torch.Tensor):
+        z = self.encode(z)
+        zp = self.prior_module.forward(z)
+        return self.decode(zp, from_forward=False)
 
 
 class VariationalScriptedRAVE(ScriptedRAVE):
@@ -417,6 +448,8 @@ class TraceModel(nn.Module):
         pretrained._jit_is_scripting = True
         self.pretrained = pretrained
         self.latent_size = pretrained.latent_size
+        self.temperature = 1.0
+        self.listen = False
 
         x = torch.zeros(1, self.pretrained.n_channels, 2**14)
         z = model.encode(x)
@@ -453,21 +486,27 @@ class TraceModel(nn.Module):
         x = self.pretrained.diagonal_shift.inverse(x)
         return x
 
-    def forward(self, temp: torch.Tensor):
-        x = torch.zeros(
-            temp.shape[0],
-            self.latent_size,
-            temp.shape[-1],
-        ).to(temp)
-
-        temp = temp.mean(-1, keepdim=True)
+    def forward(self, z: torch.Tensor):
+        x = torch.zeros_like(z)
+        # temp = temp.mean(-1, keepdim=True)
+        temp = torch.tensor(0.0 if self.listen else self.temperature)
         temp = nn.functional.softplus(temp) / math.log(2)
 
-        for i in range(x.shape[-1]):
-            x[..., i:i + 1] = self.step_forward(temp)
+        for i in range(z.shape[-1]):
+            zin = z[..., i:i+1]
+            if self.listen:
+                p = self.pretrained.quantized_normal.encode(zin)
+
+                self.previous_step.copy_(p)
+
+            next = self.step_forward(temp)
+
+            if self.listen:
+                x[..., i:i + 1] = zin
+            else:
+                x[..., i:i + 1] = next
 
         return x
-
 
 
 prior_classes = ['VariationalPrior']

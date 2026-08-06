@@ -248,6 +248,7 @@ def main(argv):
         devices=devices,
         callbacks=callbacks,
         max_epochs=300000,
+        log_every_n_steps=len(train),
         max_steps=FLAGS.max_steps,
         profiler="simple",
         enable_progress_bar=FLAGS.progress,
