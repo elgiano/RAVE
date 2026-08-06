@@ -837,7 +837,7 @@ class SphericalEncoder(nn.Module):
         self.encoder = encoder_cls(n_channels=n_channels)
 
     def reparametrize(self, z):
-        norm_z = z / torch.norm(z, p=2, dim=1, keepdim=True)
+        norm_z = nn.functional.normalize(z, p=2, dim=1, eps=1e-12)
         reg = torch.zeros_like(z).mean()
         return norm_z, reg
 
