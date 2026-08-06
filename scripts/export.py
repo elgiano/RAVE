@@ -194,12 +194,15 @@ class ScriptedRAVE(nn_tilde.Module):
         if prior is not None:
             self._has_prior = True
             self.prior_module = prior
+            # need to init cached conv before graphing
+            z = self.prior_module.forward(torch.zeros(1, self.n_channels, self.full_latent_size))
             self.register_method(
                 "prior",
                 in_channels=1,
                 in_ratio=prior.ratio,
                 out_channels = self.latent_size,
-                out_ratio=prior.ratio
+                out_ratio=prior.ratio,
+                test_method=False
             )
         else:
             self.prior_module = DumbPrior()

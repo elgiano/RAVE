@@ -103,7 +103,7 @@ def main(argv):
 
     # create model
     if isinstance(pretrained.encoder, rave.blocks.VariationalEncoder):
-        prior = rave.prior.VariationalPrior(pretrained_vae=pretrained)
+        prior = rave.prior.VariationalPrior(pretrained_vae=pretrained, sr=pretrained.sr)
     else:
         raise NotImplementedError("prior not implemented for encoder of type %s"%(type(pretrained.encoder)))
 
